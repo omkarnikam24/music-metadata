@@ -7,5 +7,5 @@ import org.springframework.boot.runApplication
 class MusicMetadataApplication
 
 fun main(args: Array<String>) {
-	runApplication<MusicMetadataApplication>(*args)
+    runApplication<MusicMetadataApplication>(*args)
 }
