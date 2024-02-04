@@ -1,12 +1,18 @@
+import com.github.dockerjava.api.model.ExposedPort
+import com.github.dockerjava.api.model.HostConfig
+import com.github.dockerjava.api.model.PortBinding
+import com.github.dockerjava.api.model.Ports
+import org.flywaydb.gradle.task.FlywayMigrateTask
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
+import org.testcontainers.containers.PostgreSQLContainer
 
 plugins {
     id("org.springframework.boot") version "3.2.2"
     id("io.spring.dependency-management") version "1.1.4"
     kotlin("jvm") version "1.9.22"
     kotlin("plugin.spring") version "1.9.22"
-    id("org.jlleitschuh.gradle.ktlint") version "12.1.0"
-    id("org.jooq.jooq-codegen-gradle") version "3.19.3"
+    id("io.github.usefulness.ktlint-gradle-plugin") version "0.8.1"
+    id("org.jooq.jooq-codegen-gradle") version "3.19.1"
     id("org.flywaydb.flyway") version "10.7.1"
 }
 
@@ -22,18 +28,32 @@ repositories {
 }
 
 dependencies {
-    implementation("org.springframework.boot:spring-boot-starter-jooq")
+    implementation("org.springframework.boot:spring-boot-starter-jooq") {
+        exclude(group = "org.jooq", module = "jooq")
+    }
+    implementation("org.jooq:jooq:3.19.1")
     implementation("org.springframework.boot:spring-boot-starter-web")
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin")
     implementation("org.jetbrains.kotlin:kotlin-reflect")
-    implementation("org.flywaydb:flyway-core")
+    implementation("org.flywaydb:flyway-core:10.7.1")
     developmentOnly("org.springframework.boot:spring-boot-devtools")
     runtimeOnly("org.postgresql:postgresql")
+    testImplementation("org.flywaydb:flyway-database-postgresql:10.7.1")
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.springframework.boot:spring-boot-testcontainers")
     testImplementation("org.testcontainers:junit-jupiter")
     testImplementation("org.testcontainers:postgresql")
     testImplementation("com.ninja-squad:springmockk:4.0.2")
+
+    jooqCodegen("org.postgresql:postgresql")
+}
+
+buildscript {
+    dependencies {
+        classpath("org.testcontainers:postgresql:1.17.5")
+        classpath("org.flywaydb:flyway-core:10.7.1")
+        classpath("org.flywaydb:flyway-database-postgresql:10.7.1")
+    }
 }
 
 tasks.withType<KotlinCompile> {
@@ -41,22 +61,57 @@ tasks.withType<KotlinCompile> {
         freeCompilerArgs += "-Xjsr305=strict"
         jvmTarget = "17"
     }
+    dependsOn("dbMigrate")
 }
 
 tasks.withType<Test> {
     useJUnitPlatform()
 }
 
-tasks {
-    jooqCodegen.get().dependsOn(flywayMigrate)
+tasks.register("dbMigrate") {
+    dependsOn(tasks.flywayMigrate, tasks.named("jooqCodegen"))
+    doLast { container.stop() }
 }
 
-flyway {
-    locations = arrayOf("classpath:db/migration")
+val container = PostgreSQLContainer("postgres")
+
+tasks.register("startPostgresContainer") {
+    doLast {
+        val port = 5432
+        container
+            .withDatabaseName("postgres")
+            .withUsername("postgres")
+            .withPassword("test")
+            .withExposedPorts(port)
+            .withCreateContainerCmdModifier {
+                it.withHostConfig(
+                    HostConfig.newHostConfig()
+                        .withPortBindings(PortBinding(Ports.Binding.bindPort(port), ExposedPort(port))),
+                )
+            }
+        container.start()
+    }
+}
+
+tasks.withType<FlywayMigrateTask> {
+    dependsOn(tasks.named("startPostgresContainer"))
+
+    doFirst {
+        driver = "org.postgresql.Driver"
+        url = "jdbc:postgresql://localhost:5432/postgres"
+        user = "postgres"
+        password = "test"
+    }
 }
 
 jooq {
     configuration {
+        jdbc {
+            driver = "org.postgresql.Driver"
+            url = "jdbc:postgresql://localhost:5432/postgres"
+            user = "postgres"
+            password = "test"
+        }
 
         generator {
             database {
@@ -71,10 +126,13 @@ jooq {
                 inputSchema = "public"
             }
 
-            generate {}
+            generate {
+                name = "org.jooq.codegen.KotlinGenerator"
+                withJooqVersionReference(false)
+            }
             target {
-                packageName = "com.example.musicmetadata.persistence.jooq"
-                directory = "src/main/jooq"
+                packageName = "org.generated.jooq"
+                directory = "build/generated-src/jooq"
             }
         }
     }
