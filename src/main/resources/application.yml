@@ -1,5 +1,5 @@
 spring:
   datasource:
-    url: jdbc:postgresql://localhost:5432/music-metadata
+    url: jdbc:postgresql://localhost:9999/music-metadata
     username: username
     password: password
