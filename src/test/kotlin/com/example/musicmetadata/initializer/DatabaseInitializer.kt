@@ -20,5 +20,8 @@ class DatabaseInitializer : ApplicationContextInitializer<ConfigurableApplicatio
             "spring.datasource.username=${container.username}",
             "spring.datasource.password=${container.password}",
         ).applyTo(applicationContext)
+        System.setProperty("db.url", container.jdbcUrl)
+        System.setProperty("db.username", container.username)
+        System.setProperty("db.password", container.password)
     }
 }
